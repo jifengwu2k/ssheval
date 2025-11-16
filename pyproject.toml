@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ssheval"
+version = "0.1.0a2"
+description = "A cross-platform pure Python script for executing remote commands over SSH and streaming raw stdout/stderr."
+readme = "README.md"
+requires-python = ">=2"
+license = "MIT"
+authors = [
+  { name="Jifeng Wu", email="jifengwu2k@gmail.com" }
+]
+classifiers = [
+    "Programming Language :: Python :: 2",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "paramiko"
+]
+
+[project.scripts]
+ssheval = "ssheval:main"
+
+[project.urls]
+"Homepage" = "https://github.com/jifengwu2k/ssheval"
+"Bug Tracker" = "https://github.com/jifengwu2k/ssheval/issues"
