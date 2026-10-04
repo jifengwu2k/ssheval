@@ -3,6 +3,7 @@
 from __future__ import print_function
 
 import argparse
+import os
 import sys
 import threading
 from typing import Union
@@ -26,14 +27,35 @@ else:
 AuthValue = Union[str, paramiko.PKey]
 
 
-def stream_pipe(src, dst, close_dst=False):
+READ_CHUNK_SIZE = 32768
+
+
+def read_stdin_chunk(size):
+    # Return as soon as some data is available instead of blocking until `size`
+    # bytes have been read, so piped stdin keeps streaming in real time.
+    read1 = getattr(sys_stdin_buffer, 'read1', None)
+    if read1 is not None:
+        return read1(size)
+    try:
+        return os.read(sys_stdin_buffer.fileno(), size)
+    except Exception:
+        return sys_stdin_buffer.read(size)
+
+
+def stream_pipe(read, dst, write_lock, close_dst=False):
     try:
         while True:
-            data = src.read(1)
+            data = read(READ_CHUNK_SIZE)
             if not data:
                 break
-            dst.write(data)
-            dst.flush()
+            # Serialize writes so chunks from stdout and stderr are not
+            # interleaved byte-by-byte when they share the same terminal.
+            write_lock.acquire()
+            try:
+                dst.write(data)
+                dst.flush()
+            finally:
+                write_lock.release()
     except Exception:
         pass  # Optionally log thread errors
     finally:
@@ -62,13 +84,19 @@ def stream_command_output(client, command, pipe_stdin):
     stdin, stdout, stderr = client.exec_command(command, get_pty=False)
 
     threads = []
+    write_lock = threading.Lock()
 
-    # Stream stdout and stderr in real time
-    threads.append(threading.Thread(target=stream_pipe, args=(stdout, sys_stdout_buffer)))
-    threads.append(threading.Thread(target=stream_pipe, args=(stderr, sys_stderr_buffer)))
+    # Stream stdout and stderr in real time. Read from the channels directly:
+    # unlike ChannelFile.read(n), recv()/recv_stderr() return as soon as any
+    # data is available instead of waiting for a full chunk.
+    threads.append(threading.Thread(
+        target=stream_pipe, args=(stdout.channel.recv, sys_stdout_buffer, write_lock)))
+    threads.append(threading.Thread(
+        target=stream_pipe, args=(stderr.channel.recv_stderr, sys_stderr_buffer, write_lock)))
 
     if pipe_stdin:
-        threads.append(threading.Thread(target=stream_pipe, args=(sys_stdin_buffer, stdin, True)))
+        threads.append(threading.Thread(
+            target=stream_pipe, args=(read_stdin_chunk, stdin, write_lock, True)))
     else:
         stdin.close()
 
